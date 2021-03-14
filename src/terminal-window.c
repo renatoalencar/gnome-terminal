@@ -24,6 +24,7 @@
 
 #include <glib.h>
 #include <glib/gi18n.h>
+#include <glib/gprintf.h>
 
 #include <gtk/gtk.h>
 #include <uuid.h>
@@ -1289,6 +1290,69 @@ action_read_only_state_cb (GSimpleAction *action,
 }
 
 static void
+run_command_in_working_directory (const gchar *command,
+                                  gpointer user_data)
+{
+  TerminalWindow *window = user_data;
+  TerminalWindowPrivate *priv = window->priv;
+
+  gchar command_with_args[2048];
+
+  const gchar *directory = vte_terminal_get_current_directory_uri (VTE_TERMINAL (priv->active_screen));
+
+  g_snprintf (command_with_args,
+              sizeof (command_with_args),
+              "%s %s",
+              command,
+              /* Add 13 bytes to the pointer to remove the prefix file:///fedora */
+              directory + 13);
+
+  g_autoptr(GError) error = NULL;
+
+  g_spawn_command_line_async (command_with_args, &error);
+
+  if (error != NULL) {
+    g_error("Error spawning process [%d]: %s", error->code, error->message);
+  }
+}
+
+/* The functions below could be only one, as they could use a parameter
+ * current command to be executed instead.
+ */
+
+static void
+action_open_in_code_cb (GSimpleAction *action,
+                        GVariant *state,
+                        gpointer user_data)
+{
+  run_command_in_working_directory ("code", user_data);
+}
+
+static void
+action_open_in_atom_cb (GSimpleAction *action,
+                        GVariant *state,
+                        gpointer user_data)
+{
+  run_command_in_working_directory ("atom-nightly", user_data);
+}
+
+static void
+action_open_in_nautilus_cb (GSimpleAction *action,
+                            GVariant *state,
+                            gpointer user_data)
+{
+  run_command_in_working_directory ("nautilus", user_data);
+}
+
+static void
+action_open_in_emacs_cb (GSimpleAction *action,
+                         GVariant *state,
+                         gpointer user_data)
+{
+  run_command_in_working_directory ("emacs", user_data);
+}
+
+static void
 action_profile_state_cb (GSimpleAction *action,
                          GVariant *state,
                          gpointer user_data)
@@ -1391,7 +1455,7 @@ app_setting_notify_destroy_cb (GtkSettings *gtk_settings)
 
 static int
 find_tab_num_at_pos (GtkNotebook *notebook,
-                     int screen_x, 
+                     int screen_x,
                      int screen_y)
 {
   GtkPositionType tab_pos;
@@ -1785,6 +1849,15 @@ screen_show_popup_menu_cb (TerminalScreen *screen,
 
   g_menu_append_section (menu, NULL, G_MENU_MODEL (section5));
 
+  gs_unref_object GMenu *open_third_party_section = g_menu_new ();
+
+  g_menu_append (open_third_party_section, _("Open in _Code"), "win.open-in-code");
+  g_menu_append (open_third_party_section, _("Open in _Atom"), "win.open-in-atom");
+  g_menu_append (open_third_party_section, _("Open in _Emacs"), "win.open-in-emacs");
+  g_menu_append (open_third_party_section, _("View _Files"), "win.open-in-nautilus");
+
+  g_menu_append_section (menu, NULL, G_MENU_MODEL (open_third_party_section));
+
   /* New Terminal section */
   gs_unref_object GMenu *section6 = g_menu_new ();
   if (terminal_app_get_menu_unified (app)) {
@@ -2100,6 +2173,11 @@ terminal_window_init (TerminalWindow *window)
 #ifdef ENABLE_SAVE
     { "save-contents",       action_save_contents_cb,    NULL,   NULL, NULL },
 #endif
+
+    { "open-in-code",        action_open_in_code_cb,     NULL,   NULL, NULL },
+    { "open-in-atom",        action_open_in_atom_cb,     NULL,   NULL, NULL },
+    { "open-in-emacs",       action_open_in_emacs_cb,    NULL,   NULL, NULL },
+    { "open-in-nautilus",    action_open_in_nautilus_cb, NULL,   NULL, NULL },
 
     /* Shadow actions for keybinding comsumption, see comment in terminal-accels.c */
     { "shadow",              action_shadow_activate_cb,  "s",    NULL, NULL },
@@ -3110,7 +3188,7 @@ terminal_window_update_geometry (TerminalWindow *window)
       /* min size is min size of the whole window, remember. */
       hints.min_width = hints.base_width + hints.width_inc * MIN_WIDTH_CHARS;
       hints.min_height = hints.base_height + hints.height_inc * MIN_HEIGHT_CHARS;
-      
+
       gtk_window_set_geometry_hints (GTK_WINDOW (window),
                                      NULL,
                                      &hints,
@@ -3162,7 +3240,7 @@ confirm_close_response_cb (GtkWidget *dialog,
 
   if (response != GTK_RESPONSE_ACCEPT)
     return;
-    
+
   if (screen)
     terminal_window_remove_screen (window, screen);
   else
@@ -3240,7 +3318,7 @@ confirm_close_window_or_tab (TerminalWindow *window,
                                               "%s", _("There is still a process running in this terminal. "
                                                       "Closing the terminal will kill it."));
 
-  gtk_window_set_title (GTK_WINDOW (dialog), ""); 
+  gtk_window_set_title (GTK_WINDOW (dialog), "");
 
   GtkWidget *remove_button = gtk_dialog_add_button (GTK_DIALOG (dialog), n_tabs > 1 ? _("C_lose Window") : _("C_lose Terminal"), GTK_RESPONSE_ACCEPT);
   gtk_style_context_add_class (gtk_widget_get_style_context (remove_button), "destructive-action");
